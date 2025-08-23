@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Offline JSON Pager (777KB chunks)</title>
+<style>
+  :root {
+    --bg: #0f1320;
+    --panel: #131833;
+    --text: #e6e9f2;
+    --muted: #9aa3b2;
+    --accent: #7aa2ff;
+    --accent-2: #9f7aff;
+    --danger: #ff6b7a;
+    --ok: #43d190;
+    --warn: #ffcc66;
+    --key: #7cc7ff;
+    --str: #a6e3a1;
+    --num: #f5c77a;
+    --bool: #f28fad;
+    --null: #cba6f7;
+    --punct: #8ea0c9;
+    --hit-bg: rgba(255, 238, 88, 0.25);
+    --hit-outline: #ffee58;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui);
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: linear-gradient(180deg, rgba(15,19,32,.95), rgba(15,19,32,.85) 70%, rgba(15,19,32,0));
+    backdrop-filter: blur(10px);
+    padding: 12px clamp(10px, 3vw, 20px);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+  .row > * { flex: 0 0 auto; }
+  .group {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px;
+    padding: 8px 10px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  label { font-size: 12px; color: var(--muted); }
+  input[type="number"], input[type="text"] {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 14px;
+    min-width: 70px;
+    outline: none;
+  }
+  input[type="file"] {
+    font-size: 13px;
+  }
+  button {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    color: #0e1020;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  button[disabled] {
+    filter: grayscale(1) brightness(0.6);
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.18);
+  }
+  .stats {
+    font-size: 12px; color: var(--muted);
+    margin-left: auto;
+  }
+
+  main {
+    padding: 10px clamp(10px, 3vw, 20px) 40px;
+  }
+  #viewer {
+    font-family: var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+    background: #0b0f1a;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 14px;
+    padding: 16px;
+    min-height: calc(100vh - 180px);
+    box-shadow: 0 10px 30px rgba(0,0,0,.35) inset, 0 8px 16px rgba(0,0,0,.15);
+    overflow: auto;
+  }
+
+  /* Syntax highlighting */
+  .tok-key   { color: var(--key);   }
+  .tok-str   { color: var(--str);   }
+  .tok-num   { color: var(--num);   }
+  .tok-bool  { color: var(--bool);  font-weight: 600; }
+  .tok-null  { color: var(--null);  font-style: italic; }
+  .tok-punct { color: var(--punct); }
+  .tok-err   { color: var(--danger); text-decoration: wavy underline; text-underline-offset: 3px; }
+
+  /* Search hits */
+  .hit {
+    background: var(--hit-bg);
+    outline: 1px solid var(--hit-outline);
+    border-radius: 4px;
+    padding: 0 2px;
+  }
+
+  .bar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .switch { display: inline-flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted);}
+  .switch input { transform: scale(1.1); }
+  .note { font-size: 12px; color: var(--muted); }
+
+  /* Helper badges */
+  .badge {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.12);
+    padding: 2px 6px; border-radius: 6px; font-size: 12px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <div class="group">
+      <label for="file">File</label>
+      <input id="file" type="file" accept=".json,application/json,text/plain" />
+      <span id="fileInfo" class="badge">No file</span>
+    </div>
+
+    <div class="group">
+      <button id="prev" class="btn-secondary" disabled>◀ Prev</button>
+      <label for="page">Page</label>
+      <input id="page" type="number" min="1" value="1" />
+      <span class="note">of <span id="totalPages">—</span></span>
+      <button id="next" class="btn-secondary" disabled>Next ▶</button>
+      <button id="jump">Jump</button>
+    </div>
+
+    <div class="group">
+      <label for="query">Search</label>
+      <input id="query" type="text" placeholder="find…" />
+      <label class="switch"><input type="checkbox" id="allMatches" /> all matches</label>
+      <button id="doSearch" class="btn-secondary">Find</button>
+      <span id="searchStats" class="badge">0 hits</span>
+    </div>
+
+    <div class="stats" id="stats">
+      Chunk: 777 KB · Offset: 0 · Loaded: 0 B
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="viewer" aria-live="polite" aria-busy="false"></div>
+  <p class="note">
+    Tips: 1) You’re viewing raw bytes (777 KB pages) — objects may span pages. 2) Use Search to locate text within the current page.
+  </p>
+</main>
+
+<script>
+(() => {
+  const CHUNK_SIZE = 777 * 1024; // 777 KB per page
+  let file = null;
+  let totalPages = 0;
+  let currentPage = 1;
+  const dec = new TextDecoder('utf-8', { fatal: false });
+
+  const $ = (id) => document.getElementById(id);
+  const $file = $('file');
+  const $fileInfo = $('fileInfo');
+  const $viewer = $('viewer');
+  const $page = $('page');
+  const $totalPages = $('totalPages');
+  const $prev = $('prev');
+  const $next = $('next');
+  const $jump = $('jump');
+  const $stats = $('stats');
+  const $query = $('query');
+  const $allMatches = $('allMatches');
+  const $doSearch = $('doSearch');
+  const $searchStats = $('searchStats');
+
+  function fmtBytes(v) {
+    if (v === 0) return '0 B';
+    const u = ['B','KB','MB','GB','TB']; let i = 0; let n = v;
+    while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+    return `${n.toFixed(n < 10 && i>0 ? 1 : 0)} ${u[i]}`;
+  }
+
+  function escapeHTML(s) {
+    return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  // Tokenizer & highlighter for JSON-ish text (works chunk-wise).
+  function highlightJSONWithSearch(src, query, allMatches) {
+    const out = [];
+    const len = src.length;
+    let i = 0;
+    let hits = 0;
+    let firstHitEl = null;
+
+    const q = query ? query.toLowerCase() : '';
+    function pushSpan(cls, text, markable, lookaheadChar) {
+      // Distinguish JSON "keys" heuristically: string immediately followed by ':' (ignoring whitespace)
+      if (cls === 'tok-str' && lookaheadChar === ':') cls = 'tok-key';
+      // Search highlighting within this token if markable text and query provided
+      if (q && markable) {
+        let remaining = text;
+        let idxBase = 0;
+        while (true) {
+          const idx = remaining.toLowerCase().indexOf(q);
+          if (idx === -1) { out.push(`<span class="${cls}">${escapeHTML(remaining)}</span>`); break; }
+          const before = remaining.slice(0, idx);
+          const hit = remaining.slice(idx, idx + q.length);
+          out.push(`<span class="${cls}">${escapeHTML(before)}</span>`);
+          const el = `<span class="hit ${cls}">${escapeHTML(hit)}</span>`;
+          if (!firstHitEl) firstHitEl = el;
+          out.push(el);
+          hits++;
+          remaining = remaining.slice(idx + q.length);
+          idxBase += idx + q.length;
+          if (!allMatches) {
+            // append the rest and stop
+            out.push(`<span class="${cls}">${escapeHTML(remaining)}</span>`);
+            break;
+          }
+        }
+      } else {
+        out.push(`<span class="${cls}">${escapeHTML(text)}</span>`);
+      }
+    }
+
+    while (i < len) {
+      const ch = src[i];
+
+      // Strings
+      if (ch === '"') {
+        let j = i + 1;
+        let escaped = false;
+        while (j < len) {
+          const c = src[j];
+          if (escaped) { escaped = false; j++; continue; }
+          if (c === '\\') { escaped = true; j++; continue; }
+          if (c === '"') { j++; break; }
+          j++;
+        }
+        const token = src.slice(i, j);
+        // lookahead for ':' after whitespace
+        let k = j;
+        while (k < len && /\s/.test(src[k])) k++;
+        const lookahead = k < len ? src[k] : '';
+        pushSpan('tok-str', token, true, lookahead);
+        i = j;
+        continue;
+      }
+
+      // Numbers
+      if (ch === '-' || (ch >= '0' && ch <= '9')) {
+        let j = i;
+        let sawDot = false, sawExp = false;
+        if (src[j] === '-') j++;
+        while (j < len && /[0-9]/.test(src[j])) j++;
+        if (src[j] === '.') { sawDot = true; j++; while (j < len && /[0-9]/.test(src[j])) j++; }
+        if (src[j] === 'e' || src[j] === 'E') {
+          sawExp = true; j++;
+          if (src[j] === '+' || src[j] === '-') j++;
+          while (j < len && /[0-9]/.test(src[j])) j++;
+        }
+        pushSpan('tok-num', src.slice(i, j), false);
+        i = j;
+        continue;
+      }
+
+      // Literals: true, false, null
+      if (/[a-zA-Z]/.test(ch)) {
+        let j = i + 1;
+        while (j < len && /[a-zA-Z]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        const lower = word.toLowerCase();
+        if (lower === 'true' || lower === 'false') {
+          pushSpan('tok-bool', word, false);
+        } else if (lower === 'null') {
+          pushSpan('tok-null', word, false);
+        } else {
+          // unknown identifier (not valid JSON, but show anyway)
+          pushSpan('tok-err', word, true);
+        }
+        i = j;
+        continue;
+      }
+
+      // Punctuation
+      if ('{}[]:,.'.includes(ch)) {
+        pushSpan('tok-punct', ch, false);
+        i++;
+        continue;
+      }
+
+      // Whitespace
+      if (/\s/.test(ch)) {
+        let j = i + 1;
+        while (j < len && /\s/.test(src[j])) j++;
+        out.push(escapeHTML(src.slice(i, j))); // no span for whitespace
+        i = j;
+        continue;
+      }
+
+      // Fallback one char
+      pushSpan('tok-err', ch, true);
+      i++;
+    }
+
+    return { html: out.join(''), hits, firstHitEl };
+  }
+
+  async function renderPage(pageNum, keepQuery=false) {
+    if (!file) return;
+    currentPage = Math.max(1, Math.min(pageNum, totalPages));
+    $page.value = String(currentPage);
+
+    const start = (currentPage - 1) * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const slice = file.slice(start, end);
+
+    $viewer.setAttribute('aria-busy', 'true');
+    $viewer.innerHTML = '<span class="note">Loading…</span>';
+
+    try {
+      const buf = await slice.arrayBuffer();
+      const txt = dec.decode(buf);
+      const q = keepQuery ? $query.value.trim() : '';
+      const { html, hits } = highlightJSONWithSearch(txt, q, $allMatches.checked);
+      $viewer.innerHTML = html;
+      $searchStats.textContent = `${hits} hit${hits===1?'':'s'}`;
+      $stats.textContent = `Chunk: ${Math.round(CHUNK_SIZE/1024)} KB · Offset: ${start.toLocaleString()} · Loaded: ${fmtBytes(end-start)} of ${fmtBytes(file.size)}`;
+      // Scroll to first hit if searching (first-match mode)
+      if (q && !$allMatches.checked) {
+        const el = $viewer.querySelector('.hit');
+        if (el) {
+          // Gentle center scroll
+          const top = el.offsetTop - ($viewer.clientHeight / 2);
+          $viewer.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        }
+      } else {
+        $viewer.scrollTop = 0;
+      }
+    } catch (e) {
+      console.error(e);
+      $viewer.innerHTML = `<span class="tok-err">Error loading chunk: ${e.message || e}</span>`;
+    } finally {
+      $viewer.setAttribute('aria-busy', 'false');
+      updateButtons();
+    }
+  }
+
+  function updateButtons() {
+    $prev.disabled = !file || currentPage <= 1;
+    $next.disabled = !file || currentPage >= totalPages;
+    $jump.disabled = !file;
+    $doSearch.disabled = !file;
+  }
+
+  // Events
+  $file.addEventListener('change', () => {
+    file = $file.files && $file.files[0] ? $file.files[0] : null;
+    if (!file) {
+      $fileInfo.textContent = 'No file';
+      $totalPages.textContent = '—';
+      $viewer.textContent = '';
+      $stats.textContent = 'Chunk: 777 KB · Offset: 0 · Loaded: 0 B';
+      updateButtons();
+      return;
+    }
+    totalPages = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+    currentPage = 1;
+    $fileInfo.textContent = `${file.name} (${fmtBytes(file.size)})`;
+    $totalPages.textContent = String(totalPages);
+    renderPage(1);
+  });
+
+  $prev.addEventListener('click', () => renderPage(currentPage - 1, true));
+  $next.addEventListener('click', () => renderPage(currentPage + 1, true));
+  $jump.addEventListener('click', () => {
+    const n = parseInt($page.value, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= totalPages) {
+      renderPage(n, true);
+    } else {
+      alert(`Enter a page between 1 and ${totalPages}.`);
+      $page.value = String(currentPage);
+    }
+  });
+
+  // Enter to jump when focused on page input
+  $page.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $jump.click();
+  });
+
+  // Search controls
+  $doSearch.addEventListener('click', () => {
+    if (!file) return;
+    renderPage(currentPage, true);
+  });
+  $query.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $doSearch.click();
+  });
+  $allMatches.addEventListener('change', () => {
+    if (!file) return;
+    renderPage(currentPage, true);
+  });
+
+  // Keyboard shortcuts: ←/→ for prev/next, Cmd/Ctrl+F focuses search
+  document.addEventListener('keydown', (e) => {
+    if (!file) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); if (!$prev.disabled) $prev.click(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); if (!$next.disabled) $next.click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      $query.focus(); $query.select();
+    }
+  });
+
+  // Initial state
+  updateButtons();
+})();
+</script>
+</body>
+</html>
